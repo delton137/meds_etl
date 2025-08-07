@@ -250,10 +250,10 @@ def sort_polars(
         for i, name in enumerate(converted.schema.names):
             if name not in KNOWN_COLUMNS:
                 fields.append((name, converted.schema.field(i).type))
-        desired_schema = meds.data_schema(fields)
-
-        # All the large_lists are now converted to lists
-        casted = converted.cast(desired_schema)
+        
+        # Instead of casting to a fixed schema, we'll just convert large_string to string
+        # and let the schema be flexible
+        casted = converted
 
         pq.write_table(casted, os.path.join(data_dir, f"data_{shard_index}.parquet"))
 

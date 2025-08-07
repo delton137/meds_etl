@@ -161,7 +161,7 @@ def write_event_data(
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
         # Define the MEDS Unsorted `subject_id` (left) to be the `person_id` columns in OMOP (right)
-        subject_id = pl.col("person_id").cast(pl.Int64)
+        subject_id = pl.col("person_id").cast(pl.Float64).cast(pl.Int64)
 
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
         # Determine what to use for the `time`                          #
@@ -211,9 +211,10 @@ def write_event_data(
         else:
             # Try using the source concept ID, but if it's not available then use the concept ID
             concept_id_field = table_details.get("concept_id_field", table_name + "_concept_id")
-            concept_id = pl.col(concept_id_field).cast(pl.Int64)
+            # Handle string values with decimal points by casting to float first, then to int
+            concept_id = pl.col(concept_id_field).cast(pl.Float64).cast(pl.Int64)
             if concept_id_field.replace("_concept_id", "_source_concept_id") in schema.names():
-                source_concept_id = pl.col(concept_id_field.replace("_concept_id", "_source_concept_id")).cast(pl.Int64)
+                source_concept_id = pl.col(concept_id_field.replace("_concept_id", "_source_concept_id")).cast(pl.Float64).cast(pl.Int64)
             else:
                 source_concept_id = pl.lit(0, dtype=pl.Int64)
 
@@ -246,7 +247,7 @@ def write_event_data(
             value = pl.coalesce(pl.col(table_details["numeric_value_field"]), value)
 
         if table_details.get("concept_id_value_field"):
-            concept_id_value = pl.col(table_details["concept_id_value_field"]).cast(pl.Int64)
+            concept_id_value = pl.col(table_details["concept_id_value_field"]).cast(pl.Float64).cast(pl.Int64)
 
             # Normally we would prefer string or numeric value.
             # But sometimes we get a value_as_concept_id with no string or numeric value.
@@ -461,6 +462,7 @@ def extract_metadata(path_to_src_omop_dir: str, path_to_decompressed_dir: str, v
     for concept_file in tqdm(itertools.chain(*get_table_files(path_to_src_omop_dir, "concept")),
                              total=len(get_table_files(path_to_src_omop_dir, "concept")[0]) + len(get_table_files(path_to_src_omop_dir, "concept")[1]),
                              desc="Generating metadata from OMOP `concept` table"):
+        
         # Note: Concept table is often split into gzipped shards by default
         if verbose:
             print(concept_file)
@@ -469,7 +471,7 @@ def extract_metadata(path_to_src_omop_dir: str, path_to_decompressed_dir: str, v
             # `load_file` will unzip the file into `path_to_decompressed_dir` if needed
             concept = read_polars_df(f.name)
 
-            concept_id = pl.col("concept_id").cast(pl.Int64)
+            concept_id = pl.col("concept_id").cast(pl.Float64).cast(pl.Int64)
             code = pl.col("vocabulary_id") + "/" + pl.col("concept_code")
 
             # Convert the table into a dictionary
@@ -507,8 +509,8 @@ def extract_metadata(path_to_src_omop_dir: str, path_to_decompressed_dir: str, v
             # This table has `concept_id_1`, `concept_id_2`, `relationship_id` columns
             concept_relationship = read_polars_df(f.name)
 
-            concept_id_1 = pl.col("concept_id_1").cast(pl.Int64)
-            concept_id_2 = pl.col("concept_id_2").cast(pl.Int64)
+            concept_id_1 = pl.col("concept_id_1").cast(pl.Float64).cast(pl.Int64)
+            concept_id_2 = pl.col("concept_id_2").cast(pl.Float64).cast(pl.Int64)
 
             custom_relationships = (
                 concept_relationship.filter(
@@ -553,7 +555,7 @@ def extract_metadata(path_to_src_omop_dir: str, path_to_decompressed_dir: str, v
     # where LOINC Code '18862-3' is a standard concept representing a lab test
     # measurement determining microorganism susceptibility to Amoxicillin+clavulanic acid
 
-    jsonschema.validate(instance=metadata, schema=meds.dataset_metadata_schema)
+    jsonschema.validate(instance=metadata, schema=meds.DatasetMetadataSchema.schema())
 
     return metadata, code_metadata, concept_id_map, concept_name_map
 
@@ -658,7 +660,7 @@ def main():
         with open(os.path.join(path_to_temp_dir, "metadata", "dataset.json"), "w") as f:
             json.dump(metadata, f)
 
-        table = pa.Table.from_pylist(code_metadata.values(), meds.code_metadata_schema())
+        table = pa.Table.from_pylist(code_metadata.values(), meds.CodeMetadataSchema.schema())
         pq.write_table(table, os.path.join(path_to_temp_dir, "metadata", "codes.parquet"))
         # And we save another copy in the final/target MEDS directory
         shutil.copytree(
